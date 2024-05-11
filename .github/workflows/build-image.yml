@@ -1,126 +1,58 @@
-name: Push LSP Docker Images
+---
+name: Build and push ccls image to GitHub image registry
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 3 1 * *'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: bkhl/lsp-containers/ccls
+  CONTEXT: servers/ccls
 
 jobs:
-  build_and_push:
-    name: Build and push ${{ matrix.context }}
+  build-and-push-image:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - context: bashls
-            tag: bash-language-server
-
-          - context: clangd
-            tag: clangd-language-server
-
-          - context: denols
-            tag: denols 
-
-          - context: dockerls
-            tag: docker-language-server
-
-          - context: eslintls
-            tag: eslint-language-server
-
-          - context: gopls
-            tag: gopls
-
-          - context: graphql-lsp
-            tag: graphql-language-service-cli
-
-          - context: html
-            tag: html-language-server
-
-          - context: intelephense
-            tag: intelephense
-
-          - context: jsonls
-            tag: json-language-server
-
-          - context: lemminx
-            tag: lemminx
-
-          - context: omnisharp
-            tag: omnisharp
-
-          - context: powershell_es
-            tag: powershell-language-server
-
-          - context: prisma
-            tag: prisma-language-server
-
-          - context: pylsp
-            tag: python-lsp-server
-
-          - context: pyright
-            tag: pyright-langserver
-
-          - context: rust_analyzer
-            tag: rust-analyzer
-
-          - context: solargraph
-            tag: solargraph
-
-          - context: sumneko_lua
-            tag: lua-language-server
-
-          - context: svelteserver
-            tag: svelte-language-server
-
-          - context: tailwindcss
-            tag: tailwindcss-language-server
-
-          - context: terraformls
-            tag: terraform-ls
-
-          - context: tsserver
-            tag: typescript-language-server
-
-          - context: volar
-            tag: volar
-
-          - context: vuels
-            tag: vue-language-server
-
-          - context: yamlls
-            tag: yaml-language-server
-
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
 
-      # TODO: Replace w/ Github Action - https://github.com/lspcontainers/dockerfiles/runs/2724936969?check_suite_focus=true#step:4:7
-      - name: Run hadolint
-        run: >
-          docker container run
-          --entrypoint hadolint
-          --rm
-          --volume $(pwd):/code
-          --workdir /code
-          hadolint/hadolint:latest-alpine
-          servers/${{ matrix.context }}/Dockerfile
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-        if: ${{ github.ref == 'refs/heads/main' }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push to Docker Hub
-        uses: docker/build-push-action@v5
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          context: servers/${{ matrix.context }}
-          push: ${{ github.ref == 'refs/heads/main' }}
-          tags: lspcontainers/${{ matrix.tag }}:latest
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: ${{ env.CONTEXT }}
+          file: ${{ env.CONTEXT }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
